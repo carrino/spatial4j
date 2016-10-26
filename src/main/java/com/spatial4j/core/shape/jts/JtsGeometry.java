@@ -8,24 +8,44 @@
 
 package com.spatial4j.core.shape.jts;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+
 import com.spatial4j.core.context.SpatialContext;
 import com.spatial4j.core.context.jts.JtsSpatialContext;
 import com.spatial4j.core.exception.InvalidShapeException;
-import com.spatial4j.core.shape.*;
+import com.spatial4j.core.shape.BaseShape;
+import com.spatial4j.core.shape.Circle;
 import com.spatial4j.core.shape.Point;
+import com.spatial4j.core.shape.Rectangle;
+import com.spatial4j.core.shape.Shape;
+import com.spatial4j.core.shape.SpatialRelation;
 import com.spatial4j.core.shape.impl.BBoxCalculator;
 import com.spatial4j.core.shape.impl.BufferedLineString;
 import com.spatial4j.core.shape.impl.PointImpl;
 import com.spatial4j.core.shape.impl.RectangleImpl;
-import com.vividsolutions.jts.geom.*;
+import com.vividsolutions.jts.geom.Coordinate;
+import com.vividsolutions.jts.geom.CoordinateSequence;
+import com.vividsolutions.jts.geom.CoordinateSequenceFilter;
+import com.vividsolutions.jts.geom.Envelope;
+import com.vividsolutions.jts.geom.Geometry;
+import com.vividsolutions.jts.geom.GeometryCollection;
+import com.vividsolutions.jts.geom.GeometryFactory;
+import com.vividsolutions.jts.geom.GeometryFilter;
+import com.vividsolutions.jts.geom.IntersectionMatrix;
+import com.vividsolutions.jts.geom.LineString;
+import com.vividsolutions.jts.geom.Lineal;
+import com.vividsolutions.jts.geom.LinearRing;
+import com.vividsolutions.jts.geom.Polygon;
+import com.vividsolutions.jts.geom.Puntal;
 import com.vividsolutions.jts.geom.prep.PreparedGeometry;
 import com.vividsolutions.jts.geom.prep.PreparedGeometryFactory;
+import com.vividsolutions.jts.geom.prep.PreparedLineString;
+import com.vividsolutions.jts.operation.predicate.RectangleContains;
+import com.vividsolutions.jts.operation.predicate.RectangleIntersects;
 import com.vividsolutions.jts.operation.union.UnaryUnionOp;
 import com.vividsolutions.jts.operation.valid.IsValidOp;
-
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
 
 /**
  * Wraps a JTS {@link Geometry} (i.e. may be a polygon or basically anything).
@@ -38,7 +58,7 @@ public class JtsGeometry extends BaseShape<JtsSpatialContext> {
 
   private final Geometry geom;//cannot be a direct instance of GeometryCollection as it doesn't support relate()
   private final boolean hasArea;
-  private final Rectangle bbox;
+  private final RectangleImpl bbox;
   protected PreparedGeometry preparedGeometry;
   protected boolean validated = false;
 
@@ -147,7 +167,7 @@ public class JtsGeometry extends BaseShape<JtsSpatialContext> {
   /** Given {@code geoms} which has already been checked for being in world
    * bounds, return the minimal longitude range of the bounding box.
    */
-  protected Rectangle computeGeoBBox(Geometry geoms) {
+  protected RectangleImpl computeGeoBBox(Geometry geoms) {
     if (geoms.isEmpty())
       return new RectangleImpl(Double.NaN, Double.NaN, Double.NaN, Double.NaN, ctx);
     final Envelope env = geoms.getEnvelopeInternal();//for minY & maxY (simple)
@@ -234,8 +254,16 @@ public class JtsGeometry extends BaseShape<JtsSpatialContext> {
     SpatialRelation bboxR = bbox.relate(rectangle);
     if (bboxR == SpatialRelation.WITHIN || bboxR == SpatialRelation.DISJOINT)
       return bboxR;
-    // FYI, the right answer could still be DISJOINT or WITHIN, but we don't know yet.
-    return relate(ctx.getGeometryFrom(rectangle));
+
+    // FYI, the right answer could still be DISJOINT, but cannot be WITHIN.
+
+    Geometry rectangleGeom = ctx.getGeometryFrom(rectangle);
+    if (!rectangle.isEmpty() && preparedGeometry instanceof PreparedLineString) {
+   	  // We know linestring cannot contain a rectangle so we just need to check for intersects.
+      return preparedGeometry.intersects(rectangleGeom) ? SpatialRelation.INTERSECTS : SpatialRelation.DISJOINT;
+    }
+    
+    return relate(rectangleGeom);
   }
 
   public SpatialRelation relate(Circle circle) {
